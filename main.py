@@ -6,7 +6,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Hola. Envíame tu ubicación y te indicaré el nivel de riesgo."
     )
-
+async def olivella(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Consultando Pla Alfa de Olivella..."
+    )
 async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lat = update.message.location.latitude
     lon = update.message.location.longitude
@@ -50,6 +53,5 @@ token = os.getenv("BOT_TOKEN")
 app = Application.builder().token(token).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.LOCATION, location))
-
-app.run_polling()
+app.add_handler(CommandHandler("olivella", olivella))
+app.add_handler(MessageHandler(filters.LOCATION, location))app.run_polling()
