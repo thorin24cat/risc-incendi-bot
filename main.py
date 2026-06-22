@@ -1,32 +1,47 @@
 from telegram import Update
-from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
+import requests
 import os
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Hola. Envíame tu ubicación y te indicaré el nivel de riesgo."
+        "Hola. Envíame tu ubicación o escribe /olivella"
     )
+
+
 async def olivella(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Consultando Pla Alfa de Olivella..."
+        "📍 Municipio: Olivella\n\n🔥 Consulta Pla Alfa pendiente de implementar"
     )
+
+
 async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lat = update.message.location.latitude
     lon = update.message.location.longitude
 
-    import requests
-
-    headers = {
-        "User-Agent": "RiscIncendiBot/1.0"
-    }
-
-    url = (
-        f"https://nominatim.openstreetmap.org/reverse"
-        f"?lat={lat}&lon={lon}&format=jsonv2"
-    )
-
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        headers = {
+            "User-Agent": "RiscIncendiBot/1.0"
+        }
+
+        url = (
+            f"https://nominatim.openstreetmap.org/reverse"
+            f"?lat={lat}&lon={lon}&format=jsonv2"
+        )
+
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=10
+        )
+
         data = response.json()
 
         address = data.get("address", {})
@@ -45,13 +60,21 @@ async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         await update.message.reply_text(
-            f"Error obteniendo municipio: {e}"
+            f"❌ Error: {str(e)}"
         )
 
-token = os.getenv("BOT_TOKEN")
 
-app = Application.builder().token(token).build()
+def main():
+    token = os.getenv("BOT_TOKEN")
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("olivella", olivella))
-app.add_handler(MessageHandler(filters.LOCATION, location))app.run_polling()
+    app = Application.builder().token(token).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("olivella", olivella))
+    app.add_handler(MessageHandler(filters.LOCATION, location))
+
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
