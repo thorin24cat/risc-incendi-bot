@@ -9,23 +9,16 @@ from telegram.ext import (
 import requests
 import os
 import json
+
 PLA_ALFA_URL = (
     "https://services7.arcgis.com/"
     "ZCqVt1fRXwwK6GF4/arcgis/rest/services/"
     "Pla_Alfa_Municipal_Avui_FL_alternatiu_VW/"
     "FeatureServer/0/query"
 )
+
 USUARIOS_FILE = "usuarios.json"
 
-def texto_nivel(nivel):
-    textos = {
-        0: "🟢 Perill baix d'incendi",
-        1: "🟡 Perill moderat d'incendi",
-        2: "🟠 Perill alt d'incendi",
-        3: "🔴 Perill molt alt d'incendi",
-        4: "🚨 Perill extrem d'incendi",
-    }
-    return textos.get(nivel, "Nivell desconegut")
 
 def cargar_usuarios():
     try:
@@ -38,6 +31,19 @@ def cargar_usuarios():
 def guardar_usuarios(datos):
     with open(USUARIOS_FILE, "w", encoding="utf-8") as f:
         json.dump(datos, f, ensure_ascii=False, indent=2)
+
+
+def texto_nivel(nivel):
+    textos = {
+        0: "🟢 Perill baix d'incendi",
+        1: "🟡 Perill moderat d'incendi",
+        2: "🟠 Perill alt d'incendi",
+        3: "🔴 Perill molt alt d'incendi",
+        4: "🚨 Perill extrem d'incendi",
+    }
+    return textos.get(nivel, "Nivell desconegut")
+
+
 def consultar_pla_alfa(municipio):
     params = {
         "where": f"NOMMUNI='{municipio}'",
@@ -64,9 +70,10 @@ def consultar_pla_alfa(municipio):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🔥 Pla Alfa Bot\n\n"
-        "Comandos disponibles:\n"
-        "/olivella\n\n"
-        "O envíame tu ubicación."
+        "Comandos:\n"
+        "/olivella\n"
+        "/estado\n\n"
+        "También puedes enviarme tu ubicación."
     )
 
 
@@ -90,36 +97,48 @@ async def olivella(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"Error: {str(e)}"
         )
+
+
 async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     usuarios = cargar_usuarios()
 
     user_id = str(update.effective_user.id)
 
-    municipio_usuario = None
-
-    if user_id in usuarios:
-        municipio_usuario = usuarios[user_id].get("municipio")
+    mensaje = ""
 
     olivella = consultar_pla_alfa("Olivella")
 
-    mensaje = (
+    mensaje += (
         f"📍 Olivella\n"
-        f"🔥 Pla Alfa: Nivel {olivella['nivel']}\n\n"
+        f"🔥 Pla Alfa: Nivel {olivella['nivel']}\n"
+        f"{texto_nivel(olivella['nivel'])}\n\n"
     )
 
-    if municipio_usuario:
+    if user_id in usuarios:
 
-        actual = consultar_pla_alfa(municipio_usuario)
+        municipio = usuarios[user_id]["municipio"]
+
+        actual = consultar_pla_alfa(municipio)
 
         if actual:
+
             mensaje += (
-                f"📍 Tu ubicación guardada: "
+                f"📍 Tu última ubicación\n"
                 f"{actual['municipio']}\n"
-                f"🔥 Pla Alfa: Nivel {actual['nivel']}"
+                f"🔥 Pla Alfa: Nivel {actual['nivel']}\n"
+                f"{texto_nivel(actual['nivel'])}"
             )
 
+    else:
+
+        mensaje += (
+            "📍 Aún no has enviado una ubicación.\n"
+            "Envíamela para poder guardarla."
+        )
+
     await update.message.reply_text(mensaje)
+
 
 async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lat = update.message.location.latitude
@@ -156,13 +175,15 @@ async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "No se ha podido determinar el municipio."
             )
             return
+
         usuarios = cargar_usuarios()
 
-usuarios[str(update.effective_user.id)] = {
-    "municipio": municipio
-}
+        usuarios[str(update.effective_user.id)] = {
+            "municipio": municipio
+        }
 
-guardar_usuarios(usuarios)
+        guardar_usuarios(usuarios)
+
         resultado = consultar_pla_alfa(municipio)
 
         if resultado is None:
@@ -175,7 +196,8 @@ guardar_usuarios(usuarios)
         await update.message.reply_text(
             f"📍 Municipio: {resultado['municipio']}\n\n"
             f"🔥 Pla Alfa: Nivel {resultado['nivel']}\n"
-            f"{texto_nivel(resultado['nivel'])}"
+            f"{texto_nivel(resultado['nivel'])}\n\n"
+            f"✅ Ubicación guardada."
         )
 
     except Exception as e:
@@ -191,8 +213,9 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("olivella", olivella))
-    app.add_handler(MessageHandler(filters.LOCATION, location))
     app.add_handler(CommandHandler("estado", estado))
+    app.add_handler(MessageHandler(filters.LOCATION, location))
+
     app.run_polling()
 
 
