@@ -55,8 +55,10 @@ async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await update.message.reply_text(
-            f"📍 Municipio: {municipio}"
-        )
+    f"📍 Municipio: {municipio}\n"
+    f"🌍 Latitud: {lat}\n"
+    f"🌍 Longitud: {lon}"
+)
 
     except Exception as e:
         await update.message.reply_text(
