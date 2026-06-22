@@ -9,17 +9,77 @@ from telegram.ext import (
 import requests
 import os
 
+PLA_ALFA_URL = (
+    "https://services7.arcgis.com/"
+    "ZCqVt1fRXwwK6GF4/arcgis/rest/services/"
+    "Pla_Alfa_Municipal_Avui_FL_alternatiu_VW/"
+    "FeatureServer/0/query"
+)
+
+
+def texto_nivel(nivel):
+    textos = {
+        0: "🟢 Perill baix d'incendi",
+        1: "🟡 Perill moderat d'incendi",
+        2: "🟠 Perill alt d'incendi",
+        3: "🔴 Perill molt alt d'incendi",
+        4: "🚨 Perill extrem d'incendi",
+    }
+    return textos.get(nivel, "Nivell desconegut")
+
+
+def consultar_pla_alfa(municipio):
+    params = {
+        "where": f"NOMMUNI='{municipio}'",
+        "outFields": "NOMMUNI,PERIL_M",
+        "f": "json"
+    }
+
+    r = requests.get(PLA_ALFA_URL, params=params, timeout=15)
+    data = r.json()
+
+    features = data.get("features", [])
+
+    if not features:
+        return None
+
+    attrs = features[0]["attributes"]
+
+    return {
+        "municipio": attrs["NOMMUNI"],
+        "nivel": attrs["PERIL_M"]
+    }
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Hola. Envíame tu ubicación o escribe /olivella"
+        "🔥 Pla Alfa Bot\n\n"
+        "Comandos disponibles:\n"
+        "/olivella\n\n"
+        "O envíame tu ubicación."
     )
 
 
 async def olivella(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📍 Municipio: Olivella\n\n🔥 Consulta Pla Alfa pendiente de implementar"
-    )
+    try:
+        resultado = consultar_pla_alfa("Olivella")
+
+        if resultado is None:
+            await update.message.reply_text(
+                "No se ha encontrado información de Olivella."
+            )
+            return
+
+        await update.message.reply_text(
+            f"📍 {resultado['municipio']}\n\n"
+            f"🔥 Pla Alfa: Nivel {resultado['nivel']}\n"
+            f"{texto_nivel(resultado['nivel'])}"
+        )
+
+    except Exception as e:
+        await update.message.reply_text(
+            f"Error: {str(e)}"
+        )
 
 
 async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -28,7 +88,7 @@ async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         headers = {
-            "User-Agent": "RiscIncendiBot/1.0"
+            "User-Agent": "PlaAlfaBot/1.0"
         }
 
         url = (
@@ -43,7 +103,6 @@ async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         data = response.json()
-
         address = data.get("address", {})
 
         municipio = (
@@ -51,18 +110,32 @@ async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             or address.get("town")
             or address.get("village")
             or address.get("city")
-            or "Desconocido"
         )
 
+        if not municipio:
+            await update.message.reply_text(
+                "No se ha podido determinar el municipio."
+            )
+            return
+
+        resultado = consultar_pla_alfa(municipio)
+
+        if resultado is None:
+            await update.message.reply_text(
+                f"📍 Municipio: {municipio}\n\n"
+                "No encontrado en Pla Alfa."
+            )
+            return
+
         await update.message.reply_text(
-    f"📍 Municipio: {municipio}\n"
-    f"🌍 Latitud: {lat}\n"
-    f"🌍 Longitud: {lon}"
-)
+            f"📍 Municipio: {resultado['municipio']}\n\n"
+            f"🔥 Pla Alfa: Nivel {resultado['nivel']}\n"
+            f"{texto_nivel(resultado['nivel'])}"
+        )
 
     except Exception as e:
         await update.message.reply_text(
-            f"❌ Error: {str(e)}"
+            f"Error: {str(e)}"
         )
 
 
