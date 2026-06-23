@@ -45,13 +45,52 @@ def texto_nivel(nivel):
 
 
 def consultar_pla_alfa(municipio):
+
     params = {
         "where": f"NOMMUNI='{municipio}'",
         "outFields": "NOMMUNI,PERIL_M",
         "f": "json"
     }
 
-    r = requests.get(PLA_ALFA_URL, params=params, timeout=15)
+    r = requests.get(
+        PLA_ALFA_URL,
+        params=params,
+        timeout=15
+    )
+
+    data = r.json()
+
+    features = data.get("features", [])
+
+    if not features:
+        return None
+
+    attrs = features[0]["attributes"]
+
+    return {
+        "municipio": attrs["NOMMUNI"],
+        "nivel": attrs["PERIL_M"]
+    }
+
+
+def consultar_pla_alfa_coordenadas(lat, lon):
+
+    params = {
+        "geometry": f"{lon},{lat}",
+        "geometryType": "esriGeometryPoint",
+        "inSR": "4326",
+        "spatialRel": "esriSpatialRelIntersects",
+        "outFields": "NOMMUNI,PERIL_M",
+        "returnGeometry": "false",
+        "f": "json"
+    }
+
+    r = requests.get(
+        PLA_ALFA_URL,
+        params=params,
+        timeout=15
+    )
+
     data = r.json()
 
     features = data.get("features", [])
@@ -68,20 +107,24 @@ def consultar_pla_alfa(municipio):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     await update.message.reply_text(
         "🔥 Pla Alfa Bot\n\n"
-        "Comandos:\n"
-        "/olivella\n"
-        "/estado\n\n"
+        "Comandos disponibles:\n\n"
+        "/olivella - Estado de Olivella\n"
+        "/estado - Estado de Olivella y tu ubicación guardada\n\n"
         "También puedes enviarme tu ubicación."
     )
 
 
 async def olivella(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     try:
+
         resultado = consultar_pla_alfa("Olivella")
 
         if resultado is None:
+
             await update.message.reply_text(
                 "No se ha encontrado información de Olivella."
             )
@@ -94,6 +137,7 @@ async def olivella(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
+
         await update.message.reply_text(
             f"Error: {str(e)}"
         )
@@ -109,11 +153,13 @@ async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     olivella = consultar_pla_alfa("Olivella")
 
-    mensaje += (
-        f"📍 Olivella\n"
-        f"🔥 Pla Alfa: Nivel {olivella['nivel']}\n"
-        f"{texto_nivel(olivella['nivel'])}\n\n"
-    )
+    if olivella:
+
+        mensaje += (
+            f"📍 Olivella\n"
+            f"🔥 Pla Alfa: Nivel {olivella['nivel']}\n"
+            f"{texto_nivel(olivella['nivel'])}\n\n"
+        )
 
     if user_id in usuarios:
 
@@ -124,7 +170,7 @@ async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if actual:
 
             mensaje += (
-                f"📍 Tu última ubicación\n"
+                f"📍 Tu ubicación guardada\n"
                 f"{actual['municipio']}\n"
                 f"🔥 Pla Alfa: Nivel {actual['nivel']}\n"
                 f"{texto_nivel(actual['nivel'])}"
@@ -134,64 +180,35 @@ async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         mensaje += (
             "📍 Aún no has enviado una ubicación.\n"
-            "Envíamela para poder guardarla."
+            "Envíamela para guardarla."
         )
 
     await update.message.reply_text(mensaje)
 
 
 async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     lat = update.message.location.latitude
     lon = update.message.location.longitude
 
     try:
-        headers = {
-            "User-Agent": "PlaAlfaBot/1.0"
-        }
 
-        url = (
-            f"https://nominatim.openstreetmap.org/reverse"
-            f"?lat={lat}&lon={lon}&format=jsonv2"
-        )
+        resultado = consultar_pla_alfa_coordenadas(lat, lon)
 
-        response = requests.get(
-            url,
-            headers=headers,
-            timeout=10
-        )
+        if resultado is None:
 
-        data = response.json()
-        address = data.get("address", {})
-
-        municipio = (
-            address.get("municipality")
-            or address.get("town")
-            or address.get("village")
-            or address.get("city")
-        )
-
-        if not municipio:
             await update.message.reply_text(
-                "No se ha podido determinar el municipio."
+                "No se ha encontrado información Pla Alfa para esta ubicación."
             )
             return
 
         usuarios = cargar_usuarios()
 
         usuarios[str(update.effective_user.id)] = {
-            "municipio": municipio
+            "municipio": resultado["municipio"]
         }
 
         guardar_usuarios(usuarios)
-
-        resultado = consultar_pla_alfa(municipio)
-
-        if resultado is None:
-            await update.message.reply_text(
-                f"📍 Municipio: {municipio}\n\n"
-                "No encontrado en Pla Alfa."
-            )
-            return
 
         await update.message.reply_text(
             f"📍 Municipio: {resultado['municipio']}\n\n"
@@ -201,13 +218,18 @@ async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
+
         await update.message.reply_text(
             f"Error: {str(e)}"
         )
 
 
 def main():
+
     token = os.getenv("BOT_TOKEN")
+
+    if not token:
+        raise ValueError("BOT_TOKEN no configurado")
 
     app = Application.builder().token(token).build()
 
@@ -215,6 +237,8 @@ def main():
     app.add_handler(CommandHandler("olivella", olivella))
     app.add_handler(CommandHandler("estado", estado))
     app.add_handler(MessageHandler(filters.LOCATION, location))
+
+    print("Bot iniciado...")
 
     app.run_polling()
 
