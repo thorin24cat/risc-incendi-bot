@@ -1,16 +1,19 @@
-from telegram import Update
+import json
+import os
+import requests
+
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
-    MessageHandler,
     ContextTypes,
+    MessageHandler,
     filters,
 )
-import requests
-import os
-import json
 
-PLA_ALFA_URL = (
+TOKEN = os.getenv("BOT_TOKEN")
+
+ARCGIS_URL = (
     "https://services7.arcgis.com/"
     "ZCqVt1fRXwwK6GF4/arcgis/rest/services/"
     "Pla_Alfa_Municipal_Avui_FL_alternatiu_VW/"
@@ -19,6 +22,10 @@ PLA_ALFA_URL = (
 
 USUARIOS_FILE = "usuarios.json"
 
+
+# --------------------------------------------------
+# USUARIOS
+# --------------------------------------------------
 
 def cargar_usuarios():
     try:
@@ -33,47 +40,38 @@ def guardar_usuarios(datos):
         json.dump(datos, f, ensure_ascii=False, indent=2)
 
 
-def texto_nivel(nivel):
-    textos = {
-        0: "🟢 Perill baix d'incendi",
-        1: "🟡 Perill moderat d'incendi",
-        2: "🟠 Perill alt d'incendi",
-        3: "🔴 Perill molt alt d'incendi",
-        4: "🚨 Perill extrem d'incendi",
-    }
-    return textos.get(nivel, "Nivell desconegut")
+# --------------------------------------------------
+# PLAN ALFA
+# --------------------------------------------------
 
-
-def consultar_pla_alfa(municipio):
+def obtener_nivel_por_municipio(municipio):
 
     params = {
-        "where": f"NOMMUNI='{municipio}'",
+        "where": f"UPPER(NOMMUNI)=UPPER('{municipio}')",
         "outFields": "NOMMUNI,PERIL_M",
-        "f": "json"
+        "returnGeometry": "false",
+        "f": "json",
     }
 
-    r = requests.get(
-        PLA_ALFA_URL,
-        params=params,
-        timeout=15
-    )
+    try:
+        r = requests.get(ARCGIS_URL, params=params, timeout=10)
+        data = r.json()
 
-    data = r.json()
+        if data.get("features"):
+            attr = data["features"][0]["attributes"]
 
-    features = data.get("features", [])
+            return {
+                "municipio": attr["NOMMUNI"],
+                "nivel": attr["PERIL_M"],
+            }
 
-    if not features:
-        return None
+    except Exception as e:
+        print(e)
 
-    attrs = features[0]["attributes"]
-
-    return {
-        "municipio": attrs["NOMMUNI"],
-        "nivel": attrs["PERIL_M"]
-    }
+    return None
 
 
-def consultar_pla_alfa_coordenadas(lat, lon):
+def obtener_nivel(lat, lon):
 
     params = {
         "geometry": f"{lon},{lat}",
@@ -82,163 +80,149 @@ def consultar_pla_alfa_coordenadas(lat, lon):
         "spatialRel": "esriSpatialRelIntersects",
         "outFields": "NOMMUNI,PERIL_M",
         "returnGeometry": "false",
-        "f": "json"
+        "f": "json",
     }
 
-    r = requests.get(
-        PLA_ALFA_URL,
-        params=params,
-        timeout=15
-    )
+    try:
+        r = requests.get(ARCGIS_URL, params=params, timeout=10)
+        data = r.json()
 
-    data = r.json()
+        if data.get("features"):
+            attr = data["features"][0]["attributes"]
 
-    features = data.get("features", [])
+            return {
+                "municipio": attr["NOMMUNI"],
+                "nivel": attr["PERIL_M"],
+            }
 
-    if not features:
-        return None
+    except Exception as e:
+        print(e)
 
-    attrs = features[0]["attributes"]
+    return None
 
-    return {
-        "municipio": attrs["NOMMUNI"],
-        "nivel": attrs["PERIL_M"]
-    }
 
+# --------------------------------------------------
+# COMANDOS
+# --------------------------------------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    teclado = [[KeyboardButton("📍 Compartir ubicación", request_location=True)]]
+
     await update.message.reply_text(
-        "🔥 Pla Alfa Bot\n\n"
-        "Comandos disponibles:\n\n"
-        "/olivella - Estado de Olivella\n"
-        "/estado - Estado de Olivella y tu ubicación guardada\n\n"
-        "También puedes enviarme tu ubicación."
+        "Hola.\n\n"
+        "Compárteme tu ubicación para guardar tu municipio.",
+        reply_markup=ReplyKeyboardMarkup(
+            teclado,
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        ),
     )
 
 
-async def olivella(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    try:
-
-        resultado = consultar_pla_alfa("Olivella")
-
-        if resultado is None:
-
-            await update.message.reply_text(
-                "No se ha encontrado información de Olivella."
-            )
-            return
-
-        await update.message.reply_text(
-            f"📍 {resultado['municipio']}\n\n"
-            f"🔥 Pla Alfa: Nivel {resultado['nivel']}\n"
-            f"{texto_nivel(resultado['nivel'])}"
-        )
-
-    except Exception as e:
-
-        await update.message.reply_text(
-            f"Error: {str(e)}"
-        )
-
-
-async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def miestado(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     usuarios = cargar_usuarios()
 
     user_id = str(update.effective_user.id)
 
-    mensaje = ""
+    if user_id not in usuarios:
 
-    olivella = consultar_pla_alfa("Olivella")
-
-    if olivella:
-
-        mensaje += (
-            f"📍 Olivella\n"
-            f"🔥 Pla Alfa: Nivel {olivella['nivel']}\n"
-            f"{texto_nivel(olivella['nivel'])}\n\n"
+        await update.message.reply_text(
+            "No tienes municipio guardado.\n\nUsa /start"
         )
+        return
+
+    municipio = usuarios[user_id]["municipio"]
+
+    info = obtener_nivel_por_municipio(municipio)
+
+    if not info:
+        await update.message.reply_text(
+            f"📍 Municipio guardado: {municipio}\n"
+            "⚠️ No se ha podido consultar el Pla Alfa."
+        )
+        return
+
+    await update.message.reply_text(
+        f"📍 Municipio: {info['municipio']}\n"
+        f"🔥 Nivel Pla Alfa: {info['nivel']}"
+    )
+
+
+async def cambiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    usuarios = cargar_usuarios()
+
+    user_id = str(update.effective_user.id)
 
     if user_id in usuarios:
+        del usuarios[user_id]
+        guardar_usuarios(usuarios)
 
-        municipio = usuarios[user_id]["municipio"]
+    teclado = [[KeyboardButton("📍 Compartir ubicación", request_location=True)]]
 
-        actual = consultar_pla_alfa(municipio)
-
-        if actual:
-
-            mensaje += (
-                f"📍 Tu ubicación guardada\n"
-                f"{actual['municipio']}\n"
-                f"🔥 Pla Alfa: Nivel {actual['nivel']}\n"
-                f"{texto_nivel(actual['nivel'])}"
-            )
-
-    else:
-
-        mensaje += (
-            "📍 Aún no has enviado una ubicación.\n"
-            "Envíamela para guardarla."
-        )
-
-    await update.message.reply_text(mensaje)
+    await update.message.reply_text(
+        "Envíame tu nueva ubicación.",
+        reply_markup=ReplyKeyboardMarkup(
+            teclado,
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        ),
+    )
 
 
-async def location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --------------------------------------------------
+# UBICACIÓN
+# --------------------------------------------------
+
+async def recibir_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lat = update.message.location.latitude
     lon = update.message.location.longitude
 
-    try:
+    info = obtener_nivel(lat, lon)
 
-        resultado = consultar_pla_alfa_coordenadas(lat, lon)
-
-        if resultado is None:
-
-            await update.message.reply_text(
-                "No se ha encontrado información Pla Alfa para esta ubicación."
-            )
-            return
-
-        usuarios = cargar_usuarios()
-
-        usuarios[str(update.effective_user.id)] = {
-            "municipio": resultado["municipio"]
-        }
-
-        guardar_usuarios(usuarios)
-
+    if not info:
         await update.message.reply_text(
-            f"📍 Municipio: {resultado['municipio']}\n\n"
-            f"🔥 Pla Alfa: Nivel {resultado['nivel']}\n"
-            f"{texto_nivel(resultado['nivel'])}\n\n"
-            f"✅ Ubicación guardada."
+            "No he podido obtener el municipio."
         )
+        return
 
-    except Exception as e:
+    usuarios = cargar_usuarios()
 
-        await update.message.reply_text(
-            f"Error: {str(e)}"
-        )
+    usuarios[str(update.effective_user.id)] = {
+        "municipio": info["municipio"]
+    }
 
+    guardar_usuarios(usuarios)
+
+    await update.message.reply_text(
+        f"✅ Municipio guardado: {info['municipio']}\n"
+        f"🔥 Nivel Pla Alfa actual: {info['nivel']}"
+    )
+
+
+# --------------------------------------------------
+# MAIN
+# --------------------------------------------------
 
 def main():
 
-    token = os.getenv("BOT_TOKEN")
-
-    if not token:
-        raise ValueError("BOT_TOKEN no configurado")
-
-    app = Application.builder().token(token).build()
+    app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("olivella", olivella))
-    app.add_handler(CommandHandler("estado", estado))
-    app.add_handler(MessageHandler(filters.LOCATION, location))
+    app.add_handler(CommandHandler("miestado", miestado))
+    app.add_handler(CommandHandler("cambiar", cambiar))
 
-    print("Bot iniciado...")
+    app.add_handler(
+        MessageHandler(
+            filters.LOCATION,
+            recibir_ubicacion,
+        )
+    )
+
+    print("Bot iniciado")
 
     app.run_polling()
 
